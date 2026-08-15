@@ -7,6 +7,7 @@ import {
   Stamp,
   Image,
   FileImage,
+  PenTool,
   type LucideIcon,
 } from "lucide-react";
 
@@ -65,5 +66,11 @@ export const tools: Tool[] = [
     title: "Image to PDF",
     description: "Turn images into a PDF",
     icon: FileImage,
+  },
+  {
+    href: "/editor",
+    title: "PDF Editor",
+    description: "Add text, images, shapes and redactions",
+    icon: PenTool,
   },
 ];

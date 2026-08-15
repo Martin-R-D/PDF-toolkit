@@ -9,6 +9,7 @@ import {
   FileImage,
   PenTool,
   GitCompare,
+  ScanText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -79,5 +80,11 @@ export const tools: Tool[] = [
     title: "Compare PDFs",
     description: "Highlight text and visual changes between two files",
     icon: GitCompare,
+  },
+  {
+    href: "/ocr",
+    title: "OCR Scanner",
+    description: "Make scanned PDFs searchable",
+    icon: ScanText,
   },
 ];

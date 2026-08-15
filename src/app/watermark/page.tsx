@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ProcessButton } from "@/components/ProcessButton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -19,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { fileToBytes } from "@/lib/pdf/load";
+import { fileToBytes, loadPdfDoc } from "@/lib/pdf/load";
 import { getPdfJsDoc, renderPageToCanvas } from "@/lib/pdf/render";
 import { downloadBytes } from "@/lib/download";
 import { parseRanges } from "@/lib/parseRanges";
@@ -125,6 +127,7 @@ export default function WatermarkPage() {
 
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const baseCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -135,14 +138,21 @@ export default function WatermarkPage() {
   const imageFile = imageFiles[0];
   const pos = POSITIONS[posIndex];
 
+  const startOver = () => {
+    setFiles([]);
+    setImageFiles([]);
+  };
+
   // reset derived state on file replace
   useEffect(() => {
     baseCanvasRef.current = null;
     previewScaleRef.current = 1;
+    setLoadError(null);
     if (!file) return;
     let cancelled = false;
     (async () => {
       try {
+        await loadPdfDoc(file);
         const doc = await getPdfJsDoc(file);
         const page = await doc.getPage(1);
         const vp = page.getViewport({ scale: 1 });
@@ -153,10 +163,7 @@ export default function WatermarkPage() {
         baseCanvasRef.current = canvas;
         drawPreview();
       } catch (err) {
-        if (!cancelled) {
-          toast.error((err as Error).message);
-          setFiles([]);
-        }
+        if (!cancelled) setLoadError((err as Error).message);
       }
     })();
     return () => {
@@ -458,11 +465,22 @@ export default function WatermarkPage() {
         hint="Select a single PDF file"
       />
 
-      {file && (
+      {!file && (
+        <EmptyState>Choose a PDF above to add a watermark.</EmptyState>
+      )}
+
+      {loadError && <LoadError message={loadError} onRetry={startOver} />}
+
+      {file && !loadError && (
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button variant="ghost" size="sm" onClick={startOver}>
+                Start over
+              </Button>
+            </div>
             <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-              <TabsList>
+              <TabsList className="flex-wrap">
                 <TabsTrigger value="text">Text</TabsTrigger>
                 <TabsTrigger value="image">Image</TabsTrigger>
               </TabsList>

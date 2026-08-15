@@ -24,11 +24,13 @@ import { toast } from "sonner";
 import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ProcessButton } from "@/components/ProcessButton";
+import { ThumbGridSkeleton } from "@/components/ThumbGridSkeleton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { useThumbnails } from "@/hooks/useThumbnails";
 import { fileToBytes } from "@/lib/pdf/load";
-import { generateThumbnails } from "@/lib/pdf/render";
 import { downloadBytes } from "@/lib/download";
 
 interface OrderItem {
@@ -69,9 +71,9 @@ function SortableTile({
       style={style}
       {...attributes}
       {...listeners}
-      className="relative cursor-grab touch-none rounded-lg border bg-card overflow-hidden active:cursor-grabbing hover:shadow-md"
+      className="relative cursor-grab touch-none overflow-hidden rounded-lg border bg-card hover:shadow-md active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <div className="absolute top-1.5 right-1.5 z-10 flex gap-1">
+      <div className="absolute right-1.5 top-1.5 z-10 flex gap-1">
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -98,15 +100,16 @@ function SortableTile({
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={thumb}
         alt={`Page ${item.pageIndex + 1}`}
-        className="w-full h-auto"
+        className="h-auto w-full"
         draggable={false}
       />
       <Badge
         variant="secondary"
-        className="absolute bottom-1.5 left-1/2 -translate-x-1/2 text-[10px] px-1.5"
+        className="absolute bottom-1.5 left-1/2 -translate-x-1/2 px-1.5 text-[10px]"
       >
         {item.pageIndex + 1}
       </Badge>
@@ -116,13 +119,11 @@ function SortableTile({
 
 export default function ReorderPage() {
   const [files, setFiles] = useState<File[]>([]);
-  const [thumbs, setThumbs] = useState<string[]>([]);
-  const [thumbLoading, setThumbLoading] = useState(false);
-  const [thumbProgress, setThumbProgress] = useState(0);
-  const [order, setOrder] = useState<OrderItem[]>([]);
-  const [loading, setLoading] = useState(false);
-
   const file = files[0];
+  const { thumbs, loading, progress, error, cancel } = useThumbnails(file);
+
+  const [order, setOrder] = useState<OrderItem[]>([]);
+  const [busy, setBusy] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -132,36 +133,10 @@ export default function ReorderPage() {
   );
 
   useEffect(() => {
-    if (!file) {
-      setThumbs([]);
-      setOrder([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setThumbLoading(true);
-      setThumbProgress(0);
-      try {
-        const result = await generateThumbnails(file, 0.3, (done, total) => {
-          if (!cancelled) setThumbProgress(Math.round((done / total) * 100));
-        });
-        if (!cancelled) {
-          setThumbs(result);
-          setOrder(result.map((_, i) => ({ id: newId(), pageIndex: i })));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error((err as Error).message);
-          setFiles([]);
-        }
-      } finally {
-        if (!cancelled) setThumbLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [file]);
+    setOrder(thumbs.map((_, i) => ({ id: newId(), pageIndex: i })));
+  }, [thumbs]);
+
+  const startOver = () => setFiles([]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -192,16 +167,13 @@ export default function ReorderPage() {
     });
   };
 
-  const resetOrder = () => {
+  const resetOrder = () =>
     setOrder(thumbs.map((_, i) => ({ id: newId(), pageIndex: i })));
-  };
 
-  const reverseOrder = () => {
-    setOrder((prev) => [...prev].reverse());
-  };
+  const reverseOrder = () => setOrder((prev) => [...prev].reverse());
 
   const handleApply = async () => {
-    setLoading(true);
+    setBusy(true);
     try {
       if (order.length === 0) throw new Error("No pages to export.");
       const bytes = await fileToBytes(file);
@@ -225,7 +197,7 @@ export default function ReorderPage() {
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
@@ -241,14 +213,17 @@ export default function ReorderPage() {
         hint="Select a single PDF file"
       />
 
-      {thumbLoading && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Rendering pages…</p>
-          <Progress value={thumbProgress} className="h-2" />
-        </div>
+      {!file && (
+        <EmptyState>Choose a PDF above to rearrange its pages.</EmptyState>
       )}
 
-      {!thumbLoading && thumbs.length > 0 && (
+      {error && <LoadError message={error} onRetry={startOver} />}
+
+      {file && loading && (
+        <ThumbGridSkeleton progress={progress} onCancel={cancel} />
+      )}
+
+      {!loading && !error && thumbs.length > 0 && (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={resetOrder}>
@@ -262,6 +237,14 @@ export default function ReorderPage() {
                 {thumbs.length} pages → {order.length} pages
               </span>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:ml-auto"
+              onClick={startOver}
+            >
+              Start over
+            </Button>
           </div>
 
           <DndContext
@@ -273,7 +256,7 @@ export default function ReorderPage() {
               items={order.map((o) => o.id)}
               strategy={rectSortingStrategy}
             >
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
                 {order.map((item) => (
                   <SortableTile
                     key={item.id}
@@ -288,7 +271,7 @@ export default function ReorderPage() {
             </SortableContext>
           </DndContext>
 
-          <ProcessButton onClick={handleApply} loading={loading}>
+          <ProcessButton onClick={handleApply} loading={busy}>
             Save reordered PDF
           </ProcessButton>
         </>

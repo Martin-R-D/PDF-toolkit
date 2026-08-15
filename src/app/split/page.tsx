@@ -7,30 +7,30 @@ import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { PageThumbGrid } from "@/components/PageThumbGrid";
 import { ProcessButton } from "@/components/ProcessButton";
+import { ThumbGridSkeleton } from "@/components/ThumbGridSkeleton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useThumbnails } from "@/hooks/useThumbnails";
 import { fileToBytes } from "@/lib/pdf/load";
-import { generateThumbnails } from "@/lib/pdf/render";
 import { downloadBytes, downloadZip } from "@/lib/download";
 import { parseRanges } from "@/lib/parseRanges";
 
 export default function SplitPage() {
   const [files, setFiles] = useState<File[]>([]);
-  const [thumbs, setThumbs] = useState<string[]>([]);
-  const [thumbLoading, setThumbLoading] = useState(false);
-  const [thumbProgress, setThumbProgress] = useState(0);
+  const file = files[0];
+  const { thumbs, loading, progress, error, cancel } = useThumbnails(file);
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [rangeText, setRangeText] = useState("");
   const [rangeSeparate, setRangeSeparate] = useState(false);
   const [everyN, setEveryN] = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const file = files[0];
   const pageCount = thumbs.length;
   const originalName = file ? file.name.replace(/\.pdf$/i, "") : "document";
 
@@ -39,32 +39,9 @@ export default function SplitPage() {
     setRangeText("");
     setRangeSeparate(false);
     setEveryN(1);
-    if (!file) {
-      setThumbs([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setThumbLoading(true);
-      setThumbProgress(0);
-      try {
-        const result = await generateThumbnails(file, 0.3, (done, total) => {
-          if (!cancelled) setThumbProgress(Math.round((done / total) * 100));
-        });
-        if (!cancelled) setThumbs(result);
-      } catch (err) {
-        if (!cancelled) {
-          toast.error((err as Error).message);
-          setFiles([]);
-        }
-      } finally {
-        if (!cancelled) setThumbLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, [file]);
+
+  const startOver = () => setFiles([]);
 
   const toggle = (index: number) => {
     setSelected((prev) => {
@@ -109,7 +86,7 @@ export default function SplitPage() {
   }
 
   const handleExtract = async () => {
-    setLoading(true);
+    setBusy(true);
     try {
       if (selected.size === 0) throw new Error("Select at least one page.");
       const src = await loadSource();
@@ -120,12 +97,12 @@ export default function SplitPage() {
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   const handleRanges = async () => {
-    setLoading(true);
+    setBusy(true);
     try {
       const src = await loadSource();
       if (rangeSeparate) {
@@ -156,12 +133,12 @@ export default function SplitPage() {
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   const handleEveryN = async () => {
-    setLoading(true);
+    setBusy(true);
     try {
       if (everyN < 1) throw new Error("Enter a number of at least 1.");
       const src = await loadSource();
@@ -181,7 +158,7 @@ export default function SplitPage() {
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
@@ -197,111 +174,122 @@ export default function SplitPage() {
         hint="Select a single PDF file"
       />
 
-      {thumbLoading && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Rendering pages…</p>
-          <Progress value={thumbProgress} className="h-2" />
-        </div>
+      {!file && (
+        <EmptyState>Choose a PDF above to see its pages.</EmptyState>
       )}
 
-      {!thumbLoading && thumbs.length > 0 && (
-        <Tabs defaultValue="extract" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="extract">Extract pages</TabsTrigger>
-            <TabsTrigger value="ranges">Custom ranges</TabsTrigger>
-            <TabsTrigger value="every">Split every N pages</TabsTrigger>
-          </TabsList>
+      {error && <LoadError message={error} onRetry={startOver} />}
 
-          <TabsContent value="extract" className="space-y-4">
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  setSelected(new Set(thumbs.map((_, i) => i)))
-                }
+      {file && loading && (
+        <ThumbGridSkeleton progress={progress} onCancel={cancel} />
+      )}
+
+      {!loading && !error && thumbs.length > 0 && (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">{pageCount} pages</p>
+            <Button variant="ghost" size="sm" onClick={startOver}>
+              Start over
+            </Button>
+          </div>
+
+          <Tabs defaultValue="extract" className="space-y-4">
+            <TabsList className="flex-wrap">
+              <TabsTrigger value="extract">Extract pages</TabsTrigger>
+              <TabsTrigger value="ranges">Custom ranges</TabsTrigger>
+              <TabsTrigger value="every">Split every N pages</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="extract" className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelected(new Set(thumbs.map((_, i) => i)))}
+                >
+                  Select all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Deselect all
+                </Button>
+              </div>
+              <PageThumbGrid
+                thumbs={thumbs}
+                selected={selected}
+                onToggle={toggle}
+              />
+              <ProcessButton
+                onClick={handleExtract}
+                disabled={selected.size === 0}
+                loading={busy}
               >
-                Select all
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSelected(new Set())}
+                Extract {selected.size} page{selected.size === 1 ? "" : "s"}
+              </ProcessButton>
+            </TabsContent>
+
+            <TabsContent value="ranges" className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="ranges">Page ranges</Label>
+                <Input
+                  id="ranges"
+                  placeholder="1-3, 5, 8-10"
+                  value={rangeText}
+                  onChange={(e) => setRangeText(e.target.value)}
+                />
+                {rangeError && (
+                  <p className="text-sm text-destructive">{rangeError}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="separate"
+                  checked={rangeSeparate}
+                  onCheckedChange={(v) => setRangeSeparate(v === true)}
+                />
+                <Label htmlFor="separate" className="font-normal">
+                  Save each range as a separate file
+                </Label>
+              </div>
+              <ProcessButton
+                onClick={handleRanges}
+                disabled={!rangeText.trim() || !!rangeError}
+                loading={busy}
               >
-                Deselect all
-              </Button>
-            </div>
-            <PageThumbGrid
-              thumbs={thumbs}
-              selected={selected}
-              onToggle={toggle}
-            />
-            <ProcessButton
-              onClick={handleExtract}
-              disabled={selected.size === 0}
-              loading={loading}
-            >
-              Extract {selected.size} page{selected.size === 1 ? "" : "s"}
-            </ProcessButton>
-          </TabsContent>
+                Split
+              </ProcessButton>
+            </TabsContent>
 
-          <TabsContent value="ranges" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="ranges">Page ranges</Label>
-              <Input
-                id="ranges"
-                placeholder="1-3, 5, 8-10"
-                value={rangeText}
-                onChange={(e) => setRangeText(e.target.value)}
-              />
-              {rangeError && (
-                <p className="text-sm text-destructive">{rangeError}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="separate"
-                checked={rangeSeparate}
-                onCheckedChange={(v) => setRangeSeparate(v === true)}
-              />
-              <Label htmlFor="separate" className="font-normal">
-                Save each range as a separate file
-              </Label>
-            </div>
-            <ProcessButton
-              onClick={handleRanges}
-              disabled={!rangeText.trim() || !!rangeError}
-              loading={loading}
-            >
-              Split
-            </ProcessButton>
-          </TabsContent>
-
-          <TabsContent value="every" className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="everyn">Pages per file</Label>
-              <Input
-                id="everyn"
-                type="number"
-                min={1}
-                value={everyN}
-                onChange={(e) =>
-                  setEveryN(Math.max(1, parseInt(e.target.value, 10) || 1))
-                }
-              />
-            </div>
-            <p className="text-sm text-muted-foreground">
-              This will create {everyNCount} file{everyNCount === 1 ? "" : "s"}.
-            </p>
-            <ProcessButton
-              onClick={handleEveryN}
-              disabled={everyN < 1}
-              loading={loading}
-            >
-              Split
-            </ProcessButton>
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="every" className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="everyn">Pages per file</Label>
+                <Input
+                  id="everyn"
+                  type="number"
+                  min={1}
+                  value={everyN}
+                  onChange={(e) =>
+                    setEveryN(Math.max(1, parseInt(e.target.value, 10) || 1))
+                  }
+                />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                This will create {everyNCount} file
+                {everyNCount === 1 ? "" : "s"}.
+              </p>
+              <ProcessButton
+                onClick={handleEveryN}
+                disabled={everyN < 1}
+                loading={busy}
+              >
+                Split
+              </ProcessButton>
+            </TabsContent>
+          </Tabs>
+        </>
       )}
     </ToolShell>
   );

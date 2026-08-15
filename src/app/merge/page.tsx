@@ -25,6 +25,8 @@ import { toast } from "sonner";
 import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ProcessButton } from "@/components/ProcessButton";
+import { EmptyState } from "@/components/EmptyState";
+import { Button } from "@/components/ui/button";
 import { loadPdfDoc, fileToBytes } from "@/lib/pdf/load";
 import { downloadBytes } from "@/lib/download";
 import { formatBytes } from "@/lib/format";
@@ -199,6 +201,21 @@ export default function MergePage() {
         onFilesChange={handleFilesChange}
         hint="Add two or more PDF files"
       />
+
+      {items.length === 0 && (
+        <EmptyState>Add two or more PDFs above to merge them.</EmptyState>
+      )}
+
+      {items.length > 0 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            {items.length} file{items.length === 1 ? "" : "s"} — drag to reorder
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => setItems([])}>
+            Start over
+          </Button>
+        </div>
+      )}
 
       {items.length > 0 && (
         <DndContext

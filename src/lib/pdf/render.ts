@@ -2,6 +2,7 @@
 
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { fileToBytes } from "./load";
+import { runYieldingLoop } from "@/hooks/useYieldingLoop";
 
 async function getLib() {
   const pdfjsLib = await import("pdfjs-dist");
@@ -43,18 +44,16 @@ export async function renderPageToDataUrl(
 export async function generateThumbnails(
   file: File,
   scale = 0.3,
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  signal?: AbortSignal
 ): Promise<string[]> {
   const doc = await getPdfJsDoc(file);
   const total = doc.numPages;
-  const thumbs: string[] = [];
+  if (total === 0) throw new Error("This PDF has no pages.");
 
-  for (let i = 1; i <= total; i++) {
-    const dataUrl = await renderPageToDataUrl(doc, i, scale);
-    thumbs.push(dataUrl);
-    onProgress?.(i, total);
-    await new Promise((r) => setTimeout(r, 0));
-  }
-
-  return thumbs;
+  return runYieldingLoop(
+    total,
+    (i) => renderPageToDataUrl(doc, i + 1, scale),
+    { signal, onProgress }
+  );
 }

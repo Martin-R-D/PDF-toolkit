@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ProcessButton } from "@/components/ProcessButton";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -182,6 +183,13 @@ export default function ImageToPdfPage() {
     });
   };
 
+  const handleClearAll = () => {
+    setItems((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.url));
+      return [];
+    });
+  };
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
@@ -268,6 +276,21 @@ export default function ImageToPdfPage() {
         onFilesChange={handleFilesChange}
         hint="PNG, JPG, or WebP — drag to reorder after adding"
       />
+
+      {items.length === 0 && (
+        <EmptyState>Add one or more images above to build a PDF.</EmptyState>
+      )}
+
+      {items.length > 0 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            {items.length} image{items.length === 1 ? "" : "s"} — drag to reorder
+          </p>
+          <Button variant="ghost" size="sm" onClick={handleClearAll}>
+            Start over
+          </Button>
+        </div>
+      )}
 
       {items.length > 0 && (
         <DndContext

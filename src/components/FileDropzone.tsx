@@ -28,13 +28,21 @@ export function FileDropzone({
   const onDrop = useCallback(
     (accepted: File[], rejections: FileRejection[]) => {
       for (const r of rejections) {
-        const reasons = r.errors.map((e) => e.message).join(", ");
-        toast.error(`${r.file.name}: ${reasons}`);
+        const reason = r.errors[0]?.code;
+        let message: string;
+        if (reason === "file-too-large") {
+          message = `"${r.file.name}" is larger than ${maxSizeMb} MB. Files are processed in your browser, so very large files aren't supported.`;
+        } else if (reason === "file-invalid-type") {
+          message = `"${r.file.name}" isn't a supported file type.`;
+        } else {
+          message = `${r.file.name}: ${r.errors.map((e) => e.message).join(", ")}`;
+        }
+        toast.error(message);
       }
       if (accepted.length === 0) return;
       onFilesChange(multiple ? [...files, ...accepted] : accepted);
     },
-    [files, multiple, onFilesChange]
+    [files, multiple, onFilesChange, maxSizeMb]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

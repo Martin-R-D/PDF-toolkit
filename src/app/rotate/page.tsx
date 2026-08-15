@@ -8,10 +8,12 @@ import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { PageThumbGrid } from "@/components/PageThumbGrid";
 import { ProcessButton } from "@/components/ProcessButton";
+import { ThumbGridSkeleton } from "@/components/ThumbGridSkeleton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { useThumbnails } from "@/hooks/useThumbnails";
 import { fileToBytes } from "@/lib/pdf/load";
-import { generateThumbnails } from "@/lib/pdf/render";
 import { downloadBytes } from "@/lib/download";
 
 function norm(deg: number): number {
@@ -20,45 +22,17 @@ function norm(deg: number): number {
 
 export default function RotatePage() {
   const [files, setFiles] = useState<File[]>([]);
-  const [thumbs, setThumbs] = useState<string[]>([]);
-  const [thumbLoading, setThumbLoading] = useState(false);
-  const [thumbProgress, setThumbProgress] = useState(0);
-  const [rotations, setRotations] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
-
   const file = files[0];
+  const { thumbs, loading, progress, error, cancel } = useThumbnails(file);
+
+  const [rotations, setRotations] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!file) {
-      setThumbs([]);
-      setRotations([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setThumbLoading(true);
-      setThumbProgress(0);
-      try {
-        const result = await generateThumbnails(file, 0.3, (done, total) => {
-          if (!cancelled) setThumbProgress(Math.round((done / total) * 100));
-        });
-        if (!cancelled) {
-          setThumbs(result);
-          setRotations(new Array(result.length).fill(0));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error((err as Error).message);
-          setFiles([]);
-        }
-      } finally {
-        if (!cancelled) setThumbLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [file]);
+    setRotations(new Array(thumbs.length).fill(0));
+  }, [thumbs]);
+
+  const startOver = () => setFiles([]);
 
   const rotatePage = (index: number, delta: number) => {
     setRotations((prev) =>
@@ -70,12 +44,10 @@ export default function RotatePage() {
     setRotations((prev) => prev.map((r) => norm(r + delta)));
   };
 
-  const reset = () => {
-    setRotations((prev) => prev.map(() => 0));
-  };
+  const reset = () => setRotations((prev) => prev.map(() => 0));
 
   const handleApply = async () => {
-    setLoading(true);
+    setBusy(true);
     try {
       const bytes = await fileToBytes(file);
       let doc: PDFDocument;
@@ -96,7 +68,7 @@ export default function RotatePage() {
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
@@ -109,31 +81,50 @@ export default function RotatePage() {
         hint="Select a single PDF file"
       />
 
-      {thumbLoading && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Rendering pages…</p>
-          <Progress value={thumbProgress} className="h-2" />
-        </div>
+      {!file && <EmptyState>Choose a PDF above to rotate its pages.</EmptyState>}
+
+      {error && <LoadError message={error} onRetry={startOver} />}
+
+      {file && loading && (
+        <ThumbGridSkeleton progress={progress} onCancel={cancel} />
       )}
 
-      {!thumbLoading && thumbs.length > 0 && (
+      {!loading && !error && thumbs.length > 0 && (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => rotateAll(-90)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="max-sm:flex-1"
+              onClick={() => rotateAll(-90)}
+            >
               <RotateCcw className="mr-1 h-4 w-4" />
               Rotate all left
             </Button>
-            <Button variant="outline" size="sm" onClick={() => rotateAll(90)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="max-sm:flex-1"
+              onClick={() => rotateAll(90)}
+            >
               <RotateCw className="mr-1 h-4 w-4" />
               Rotate all right
             </Button>
             <Button variant="outline" size="sm" onClick={reset}>
               Reset
             </Button>
-            <span className="text-sm text-muted-foreground">
-              You can also rotate individual pages using the buttons on each page.
-            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:ml-auto"
+              onClick={startOver}
+            >
+              Start over
+            </Button>
           </div>
+          <p className="text-sm text-muted-foreground">
+            You can also rotate individual pages using the buttons on each page.
+          </p>
 
           <PageThumbGrid
             thumbs={thumbs}
@@ -168,7 +159,7 @@ export default function RotatePage() {
             )}
           />
 
-          <ProcessButton onClick={handleApply} loading={loading}>
+          <ProcessButton onClick={handleApply} loading={busy}>
             Apply rotation
           </ProcessButton>
         </>

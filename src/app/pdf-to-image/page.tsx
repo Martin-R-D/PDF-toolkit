@@ -7,10 +7,12 @@ import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { PageThumbGrid } from "@/components/PageThumbGrid";
 import { ProcessButton } from "@/components/ProcessButton";
+import { ThumbGridSkeleton } from "@/components/ThumbGridSkeleton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectTrigger,
@@ -18,11 +20,9 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import {
-  getPdfJsDoc,
-  renderPageToCanvas,
-  generateThumbnails,
-} from "@/lib/pdf/render";
+import { useThumbnails } from "@/hooks/useThumbnails";
+import { useYieldingLoop } from "@/hooks/useYieldingLoop";
+import { getPdfJsDoc, renderPageToCanvas } from "@/lib/pdf/render";
 import { downloadDataUrl, downloadZip } from "@/lib/download";
 
 interface ImageResult {
@@ -35,54 +35,31 @@ interface ImageResult {
 
 export default function PdfToImagePage() {
   const [files, setFiles] = useState<File[]>([]);
-  const [thumbs, setThumbs] = useState<string[]>([]);
-  const [thumbLoading, setThumbLoading] = useState(false);
-  const [thumbProgress, setThumbProgress] = useState(0);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const file = files[0];
+  const {
+    thumbs,
+    loading: thumbLoading,
+    progress: thumbProgress,
+    error,
+    cancel: cancelThumbs,
+  } = useThumbnails(file);
 
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [format, setFormat] = useState<"png" | "jpeg">("png");
   const [quality, setQuality] = useState(0.92);
   const [dpi, setDpi] = useState("150");
-
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<ImageResult[]>([]);
 
-  const file = files[0];
+  const { run, cancel, running, progress } = useYieldingLoop();
+
   const baseName = file ? file.name.replace(/\.pdf$/i, "") : "document";
 
   useEffect(() => {
-    setSelected(new Set());
     setResults([]);
-    if (!file) {
-      setThumbs([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setThumbLoading(true);
-      setThumbProgress(0);
-      try {
-        const result = await generateThumbnails(file, 0.3, (done, total) => {
-          if (!cancelled) setThumbProgress(Math.round((done / total) * 100));
-        });
-        if (!cancelled) {
-          setThumbs(result);
-          setSelected(new Set(result.map((_, i) => i)));
-        }
-      } catch (err) {
-        if (!cancelled) {
-          toast.error((err as Error).message);
-          setFiles([]);
-        }
-      } finally {
-        if (!cancelled) setThumbLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [file]);
+    setSelected(new Set(thumbs.map((_, i) => i)));
+  }, [thumbs]);
+
+  const startOver = () => setFiles([]);
 
   const toggle = (index: number) => {
     setSelected((prev) => {
@@ -94,8 +71,6 @@ export default function PdfToImagePage() {
   };
 
   const handleConvert = async () => {
-    setLoading(true);
-    setProgress(0);
     setResults([]);
     try {
       if (selected.size === 0) throw new Error("Select at least one page.");
@@ -104,32 +79,31 @@ export default function PdfToImagePage() {
       const pages = Array.from(selected).sort((a, b) => a - b);
       const type = format === "png" ? "image/png" : "image/jpeg";
       const ext = format === "png" ? "png" : "jpg";
-      const out: ImageResult[] = [];
 
-      for (let i = 0; i < pages.length; i++) {
+      const out = await run<ImageResult>(pages.length, async (i) => {
         const pageNum = pages[i] + 1;
         const canvas = await renderPageToCanvas(doc, pageNum, scale);
         const dataUrl = canvas.toDataURL(type, quality);
-        out.push({
+        const result: ImageResult = {
           page: pageNum,
           dataUrl,
           width: canvas.width,
           height: canvas.height,
           name: `page-${pageNum}.${ext}`,
-        });
+        };
         canvas.width = 0;
         canvas.height = 0;
-        setProgress(Math.round(((i + 1) / pages.length) * 100));
-        await new Promise((r) => setTimeout(r, 0));
-      }
+        return result;
+      });
 
+      if (out === null) {
+        toast.info("Conversion cancelled.");
+        return;
+      }
       setResults(out);
       toast.success(`Converted ${out.length} page${out.length === 1 ? "" : "s"}.`);
     } catch (err) {
       toast.error((err as Error).message);
-    } finally {
-      setLoading(false);
-      setProgress(0);
     }
   };
 
@@ -153,16 +127,19 @@ export default function PdfToImagePage() {
         hint="Select a single PDF file"
       />
 
-      {thumbLoading && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">Rendering pages…</p>
-          <Progress value={thumbProgress} className="h-2" />
-        </div>
+      {!file && (
+        <EmptyState>Choose a PDF above to export its pages as images.</EmptyState>
       )}
 
-      {!thumbLoading && thumbs.length > 0 && (
+      {error && <LoadError message={error} onRetry={startOver} />}
+
+      {file && thumbLoading && (
+        <ThumbGridSkeleton progress={thumbProgress} onCancel={cancelThumbs} />
+      )}
+
+      {!thumbLoading && !error && thumbs.length > 0 && (
         <>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -176,6 +153,14 @@ export default function PdfToImagePage() {
               onClick={() => setSelected(new Set())}
             >
               Deselect all
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="sm:ml-auto"
+              onClick={startOver}
+            >
+              Start over
             </Button>
           </div>
 
@@ -218,7 +203,9 @@ export default function PdfToImagePage() {
                   max={1}
                   step={0.02}
                   value={[quality]}
-                  onValueChange={(v) => setQuality(Array.isArray(v) ? v[0] : v)}
+                  onValueChange={(v) =>
+                    setQuality(Array.isArray(v) ? v[0] : v)
+                  }
                 />
               </div>
             )}
@@ -227,19 +214,28 @@ export default function PdfToImagePage() {
           <ProcessButton
             onClick={handleConvert}
             disabled={selected.size === 0}
-            loading={loading}
+            loading={running}
             progress={progress}
           >
             Convert {selected.size} page{selected.size === 1 ? "" : "s"}
           </ProcessButton>
+          {running && (
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={cancel}
+            >
+              Cancel
+            </Button>
+          )}
         </>
       )}
 
       {results.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-semibold">Results</h2>
-            <Button onClick={handleZip}>
+            <Button onClick={handleZip} className="max-sm:w-full">
               <Download className="mr-2 h-4 w-4" />
               Download all as ZIP
             </Button>

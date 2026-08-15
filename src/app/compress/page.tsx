@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { ToolShell } from "@/components/ToolShell";
 import { FileDropzone } from "@/components/FileDropzone";
 import { ProcessButton } from "@/components/ProcessButton";
+import { LoadError } from "@/components/LoadError";
+import { EmptyState } from "@/components/EmptyState";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -19,7 +21,8 @@ import {
   SelectItem,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { fileToBytes } from "@/lib/pdf/load";
+import { useYieldingLoop } from "@/hooks/useYieldingLoop";
+import { loadPdfDoc } from "@/lib/pdf/load";
 import { getPdfJsDoc, renderPageToCanvas } from "@/lib/pdf/render";
 import { downloadBytes } from "@/lib/download";
 import { formatBytes } from "@/lib/format";
@@ -31,64 +34,63 @@ interface Result {
 
 export default function CompressPage() {
   const [files, setFiles] = useState<File[]>([]);
+  const file = files[0];
+
   const [dpi, setDpi] = useState("150");
   const [quality, setQuality] = useState(0.6);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  const file = files[0];
+  const { run, cancel, running, progress } = useYieldingLoop();
+
   const originalSize = file?.size ?? 0;
 
   useEffect(() => {
     setResult(null);
-    setProgress(0);
+    setLoadError(null);
+    if (!file) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await loadPdfDoc(file);
+      } catch (err) {
+        if (!cancelled) setLoadError((err as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [file]);
 
+  const startOver = () => setFiles([]);
+
   const handleLossless = async () => {
-    setLoading(true);
+    setBusy(true);
     setResult(null);
     try {
-      const bytes = await fileToBytes(file);
-      let doc: PDFDocument;
-      try {
-        doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      } catch {
-        throw new Error(
-          `Could not read "${file.name}". It may be corrupt or password-protected.`
-        );
-      }
+      const doc = await loadPdfDoc(file);
       const out = await doc.save({ useObjectStreams: true });
       setResult({ bytes: out, newSize: out.byteLength });
       toast.success("Compression complete.");
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   const handleAggressive = async () => {
-    setLoading(true);
     setResult(null);
-    setProgress(0);
     try {
-      const bytes = await fileToBytes(file);
-      let src: PDFDocument;
-      try {
-        src = await PDFDocument.load(bytes, { ignoreEncryption: true });
-      } catch {
-        throw new Error(
-          `Could not read "${file.name}". It may be corrupt or password-protected.`
-        );
-      }
+      const src = await loadPdfDoc(file);
       const dpiNum = parseInt(dpi, 10);
       const scale = dpiNum / 72;
       const pdfDoc = await getPdfJsDoc(file);
       const total = src.getPageCount();
       const out = await PDFDocument.create();
 
-      for (let i = 0; i < total; i++) {
+      const done = await run<null>(total, async (i) => {
         const srcPage = src.getPage(i);
         const { width, height } = srcPage.getSize();
         const canvas = await renderPageToCanvas(pdfDoc, i + 1, scale);
@@ -98,18 +100,19 @@ export default function CompressPage() {
         newPage.drawImage(jpg, { x: 0, y: 0, width, height });
         canvas.width = 0;
         canvas.height = 0;
-        setProgress(Math.round(((i + 1) / total) * 100));
-        await new Promise((r) => setTimeout(r, 0));
+        return null;
+      });
+
+      if (done === null) {
+        toast.info("Compression cancelled.");
+        return;
       }
 
-      const result = await out.save();
-      setResult({ bytes: result, newSize: result.byteLength });
+      const bytes = await out.save();
+      setResult({ bytes, newSize: bytes.byteLength });
       toast.success("Compression complete.");
     } catch (err) {
       toast.error((err as Error).message);
-    } finally {
-      setLoading(false);
-      setProgress(0);
     }
   };
 
@@ -139,13 +142,18 @@ export default function CompressPage() {
             mode or different settings.
           </p>
         )}
-        <Button
-          className="w-full"
-          onClick={() => downloadBytes(result.bytes, "compressed.pdf")}
-        >
-          <Download className="mr-2 h-4 w-4" />
-          Download
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            className="flex-1"
+            onClick={() => downloadBytes(result.bytes, "compressed.pdf")}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Download
+          </Button>
+          <Button variant="outline" onClick={startOver}>
+            Start over
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -159,14 +167,18 @@ export default function CompressPage() {
         hint="Select a single PDF file"
       />
 
-      {file && (
+      {!file && <EmptyState>Choose a PDF above to compress it.</EmptyState>}
+
+      {loadError && <LoadError message={loadError} onRetry={startOver} />}
+
+      {file && !loadError && (
         <>
           <p className="text-sm text-muted-foreground">
             Original size: {formatBytes(originalSize)}
           </p>
 
           <Tabs defaultValue="lossless" className="space-y-4">
-            <TabsList>
+            <TabsList className="flex-wrap">
               <TabsTrigger value="lossless">Lossless</TabsTrigger>
               <TabsTrigger value="aggressive">
                 Aggressive (rasterize)
@@ -178,7 +190,7 @@ export default function CompressPage() {
                 Re-saves the file with optimized object streams. Savings are
                 modest, but text stays selectable.
               </p>
-              <ProcessButton onClick={handleLossless} loading={loading}>
+              <ProcessButton onClick={handleLossless} loading={busy}>
                 Compress
               </ProcessButton>
               {resultCard}
@@ -214,18 +226,25 @@ export default function CompressPage() {
                     max={0.9}
                     step={0.05}
                     value={[quality]}
-                    onValueChange={(v) => setQuality(Array.isArray(v) ? v[0] : v)}
+                    onValueChange={(v) =>
+                      setQuality(Array.isArray(v) ? v[0] : v)
+                    }
                   />
                 </div>
               </div>
 
               <ProcessButton
                 onClick={handleAggressive}
-                loading={loading}
+                loading={running}
                 progress={progress}
               >
                 Compress
               </ProcessButton>
+              {running && (
+                <Button variant="outline" className="w-full" onClick={cancel}>
+                  Cancel
+                </Button>
+              )}
               {resultCard}
             </TabsContent>
           </Tabs>

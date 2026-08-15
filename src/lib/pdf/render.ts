@@ -41,6 +41,20 @@ export async function renderPageToDataUrl(
   return canvas.toDataURL(type, quality);
 }
 
+export async function extractText(file: File): Promise<string> {
+  const doc = await getPdfJsDoc(file);
+  const parts: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const text = content.items
+      .map((it) => ("str" in it ? it.str : ""))
+      .join(" ");
+    parts.push(text);
+  }
+  return parts.join("\n\n");
+}
+
 export async function generateThumbnails(
   file: File,
   scale = 0.3,

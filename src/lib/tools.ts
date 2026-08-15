@@ -8,6 +8,7 @@ import {
   Image,
   FileImage,
   PenTool,
+  GitCompare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,5 +73,11 @@ export const tools: Tool[] = [
     title: "PDF Editor",
     description: "Add text, images, shapes and redactions",
     icon: PenTool,
+  },
+  {
+    href: "/compare",
+    title: "Compare PDFs",
+    description: "Highlight text and visual changes between two files",
+    icon: GitCompare,
   },
 ];

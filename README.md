@@ -3,6 +3,8 @@
 Every PDF tool you need, running **100% in your browser**. Merge, split, edit,
 compress, OCR and convert PDFs — free, private, and offline.
 
+🌐 **Live Demo: [pdf-toolkit-lake.vercel.app](https://pdf-toolkit-lake.vercel.app/)**
+
 ## Privacy
 
 LocalPDF does all of its work client-side using WebAssembly and JavaScript.

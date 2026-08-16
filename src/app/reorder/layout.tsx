@@ -1,0 +1,8 @@
+import type { ReactNode } from "react";
+import { toolMetadata } from "@/lib/seo";
+
+export const metadata = toolMetadata("/reorder");
+
+export default function Layout({ children }: { children: ReactNode }) {
+  return children;
+}

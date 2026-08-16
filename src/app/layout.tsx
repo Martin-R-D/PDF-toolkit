@@ -1,10 +1,12 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Roboto, Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { SITE_NAME, SITE_URL, SITE_DESCRIPTION } from "@/lib/seo";
 import Link from "next/link";
 import "./globals.css";
 
@@ -19,9 +21,34 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "PDF Toolkit",
-  description:
-    "Every PDF tool you need, right in your browser. 100% client-side.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — Every PDF tool, 100% in your browser`,
+    template: `%s | ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: SITE_NAME },
+  icons: { icon: "/icon.svg", apple: "/apple-icon.png" },
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} — Every PDF tool, 100% in your browser`,
+    description: SITE_DESCRIPTION,
+    images: ["/og-image.png"],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} — Every PDF tool, 100% in your browser`,
+    description: SITE_DESCRIPTION,
+    images: ["/og-image.png"],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -58,6 +85,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </Link>
           </footer>
           <Toaster richColors />
+          <ServiceWorkerRegister />
         </ThemeProvider>
       </body>
     </html>

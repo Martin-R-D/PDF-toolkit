@@ -10,6 +10,7 @@ import {
   PenTool,
   GitCompare,
   ScanText,
+  FileType,
   type LucideIcon,
 } from "lucide-react";
 
@@ -86,5 +87,11 @@ export const tools: Tool[] = [
     title: "OCR Scanner",
     description: "Make scanned PDFs searchable",
     icon: ScanText,
+  },
+  {
+    href: "/pdf-to-docx",
+    title: "PDF to Word",
+    description: "Export text to an editable DOCX",
+    icon: FileType,
   },
 ];
